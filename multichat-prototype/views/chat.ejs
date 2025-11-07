@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatSphere | Real-Time Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/socket.io/socket.io.js"></script>
+    <%- include('partials/styles') %>
+</head>
+<body>
+    <div class="gradient-bg"></div>
+    <div class="particles" id="particles"></div>
+
+    <!-- Connection Status -->
+    <div class="connection-status" id="connectionStatus">
+        <div class="status-dot"></div>
+        <span>Connecting...</span>
+    </div>
+
+    <!-- Hero Section -->
+    <section class="hero" id="heroSection">
+        <h1>Welcome to ChatSphere</h1>
+        <p>Join a room or create your own to start chatting</p>
+        
+        <div class="button-group">
+            <button class="btn btn-primary" onclick="openModal('joinModal')">
+                <span><i class="fas fa-sign-in-alt"></i> Join Room</span>
+            </button>
+            <button class="btn btn-secondary" onclick="openModal('adminModal')">
+                <span><i class="fas fa-user-shield"></i> Create Room (Admin)</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- Chat Section (Hidden initially) -->
+    <section class="chat-section" id="chatSection" style="display: none;">
+        <div class="chat-container">
+            <div class="chat-header">
+                <h2><i class="fas fa-comments"></i> <span id="roomTitle">Chat Room</span></h2>
+                <div class="status-dot"></div>
+                <span style="color: #57f287;" id="roomStatus">Connected</span>
+            </div>
+            
+            <div class="chat-messages" id="chatMessages">
+                <div class="message system">
+                    <div class="message-bubble">Welcome! You are now connected to the chat room.</div>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <input type="text" class="chat-input" id="chatInput" placeholder="Type your message..." onkeypress="handleKeyPress(event)" disabled>
+                <button class="send-btn" id="sendBtn" onclick="sendChatMessage()" disabled>
+                    <i class="fas fa-paper-plane"></i> Send
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Join Room Modal -->
+    <div class="modal" id="joinModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-door-open"></i> Join Chat Room</h2>
+                <button class="close-btn" onclick="closeModal('joinModal')">&times;</button>
+            </div>
+            <div class="form-section">
+                <div class="form-group">
+                    <label>Your Username</label>
+                    <input type="text" id="joinUsername" placeholder="Enter your username" required>
+                </div>
+                <div class="form-group">
+                    <label>Room Name</label>
+                    <input type="text" id="joinRoomName" placeholder="Enter room name" required>
+                </div>
+                <div class="form-group">
+                    <label>Room Code</label>
+                    <input type="password" id="joinRoomCode" placeholder="Enter room code" required>
+                </div>
+                <button class="btn btn-primary" onclick="requestJoinRoom()" style="width: 100%; margin-top: 1rem;">
+                    <span><i class="fas fa-paper-plane"></i> Request to Join</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Panel Modal -->
+    <div class="modal" id="adminModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-user-shield"></i> Admin Panel</h2>
+                <button class="close-btn" onclick="closeModal('adminModal')">&times;</button>
+            </div>
+            
+            <div class="admin-tabs">
+                <button class="tab-btn active" onclick="switchTab('create')">Create Room</button>
+                <button class="tab-btn" onclick="switchTab('manage')" id="manageTabBtn" style="display: none;">Manage Users</button>
+            </div>
+
+            <!-- Create Room Tab -->
+            <div class="tab-content active" id="createTab">
+                <div class="form-section">
+                    <div class="form-group">
+                        <label>Room Name</label>
+                        <input type="text" id="adminRoomName" placeholder="Enter room name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Room Code</label>
+                        <input type="password" id="adminRoomCode" placeholder="Create a secure code" required>
+                    </div>
+                    <button class="btn btn-primary" onclick="createRoom()" style="width: 100%; margin-top: 1rem;">
+                        <span><i class="fas fa-plus"></i> Create Room</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Manage Users Tab -->
+            <div class="tab-content" id="manageTab">
+                <div class="form-section">
+                    <h3 style="color: #5865f2; margin-bottom: 1rem;"><i class="fas fa-clock"></i> Pending Requests</h3>
+                    <div class="user-list" id="pendingList">
+                        <div class="empty-state">
+                            <i class="fas fa-user-clock"></i>
+                            <p>No pending requests</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3 style="color: #5865f2; margin-bottom: 1rem;"><i class="fas fa-users"></i> Active Users</h3>
+                    <div class="user-list" id="activeList">
+                        <div class="empty-state">
+                            <i class="fas fa-users"></i>
+                            <p>No active users</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div class="notification" id="notification"></div>
+
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        
+        // DOM Elements
+        const heroSection = document.getElementById('heroSection');
+        const chatSection = document.getElementById('chatSection');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const notification = document.getElementById('notification');
+        
+        // State variables
+        let currentRoom = '';
+        let currentUsername = '';
+        let isAdmin = false;
+
+        // ==========================================
+        // PARTICLE BACKGROUND
+        // ==========================================
+        function createParticles() {
+            const particlesContainer = document.getElementById('particles');
+            for (let i = 0; i < 100; i++) {
+                const particle = document.createElement('div');
+                particle.classList.add('particle');
+                particle.style.left = Math.random() * 100 + 'vw';
+                particle.style.top = Math.random() * 100 + 'vh';
+                particle.style.animationDuration = 10 + Math.random() * 20 + 's';
+                particlesContainer.appendChild(particle);
+            }
+        }
+
+        // ==========================================
+        // SOCKET.IO EVENT HANDLERS
+        // ==========================================
+
+        socket.on('connect', () => {
+            connectionStatus.classList.remove('disconnected');
+            connectionStatus.classList.add('connected');
+            connectionStatus.querySelector('span').innerText = 'Connected';
+            console.log('[Connected] Socket ID:', socket.id);
+        });
+
+        socket.on('disconnect', () => {
+            connectionStatus.classList.remove('connected');
+            connectionStatus.classList.add('disconnected');
+            connectionStatus.querySelector('span').innerText = 'Disconnected';
+            showNotification('Disconnected from server', 'error');
+        });
+
+        socket.on('newMessage', data => {
+            addMessageToChat(data.username, data.message, data.isOwnMessage ? 'user' : 'other');
+        });
+
+        socket.on('joinApproved', data => {
+            showNotification(data.message, 'success');
+            chatInput.disabled = false;
+            sendBtn.disabled = false;
+        });
+
+        socket.on('joinRejected', data => {
+            showNotification(data.message, 'error');
+            chatSection.style.display = 'none';
+            heroSection.style.display = 'flex';
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+        });
+
+        socket.on('removedFromRoom', data => {
+            showNotification(data.message, 'error');
+            chatSection.style.display = 'none';
+            heroSection.style.display = 'flex';
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+        });
+
+        socket.on('userJoined', data => {
+            addMessageToChat('', data.message, 'system');
+        });
+
+        socket.on('userLeft', data => {
+            addMessageToChat('', data.message, 'system');
+        });
+
+        socket.on('roomClosed', data => {
+            showNotification(data.message, 'error');
+            setTimeout(() => {
+                chatSection.style.display = 'none';
+                heroSection.style.display = 'flex';
+            }, 2000);
+        });
+
+        socket.on('pendingUser', data => {
+            showNotification(`${data.username} requested to join the room`, 'info');
+        });
+
+        socket.on('updateUserLists', data => {
+            updateUserList('pendingList', data.pending, true);
+            updateUserList('activeList', data.active, false);
+        });
+
+        // ==========================================
+        // USER FUNCTIONS
+        // ==========================================
+
+        function requestJoinRoom() {
+            const username = document.getElementById('joinUsername').value.trim();
+            const roomName = document.getElementById('joinRoomName').value.trim();
+            const code = document.getElementById('joinRoomCode').value.trim();
+
+            if (!username || !roomName || !code) {
+                showNotification('All fields are required', 'error');
+                return;
+            }
+
+            currentUsername = username;
+            currentRoom = roomName;
+
+            socket.emit('requestJoin', { username, roomName, code }, (res) => {
+                if (res.success) {
+                    showNotification(res.message, 'info');
+                    closeModal('joinModal');
+                    heroSection.style.display = 'none';
+                    chatSection.style.display = 'block';
+                    document.getElementById('roomTitle').innerText = roomName;
+                    // Keep inputs disabled until admin approves
+                } else {
+                    showNotification(res.message, 'error');
+                }
+            });
+        }
+
+        function sendChatMessage() {
+            const message = chatInput.value.trim();
+            if (!message) return;
+
+            socket.emit('sendMessage', { message, roomName: currentRoom }, (res) => {
+                if (res.success) {
+                    chatInput.value = '';
+                } else {
+                    showNotification(res.message, 'error');
+                }
+            });
+        }
+
+        function handleKeyPress(e) {
+            if (e.key === 'Enter') sendChatMessage();
+        }
+
+        // ==========================================
+        // ADMIN FUNCTIONS
+        // ==========================================
+
+        function createRoom() {
+            const roomName = document.getElementById('adminRoomName').value.trim();
+            const code = document.getElementById('adminRoomCode').value.trim();
+
+            if (!roomName || !code) {
+                showNotification('All fields are required', 'error');
+                return;
+            }
+
+            socket.emit('createRoom', { roomName, code }, (res) => {
+                if (res.success) {
+                    showNotification('Room created successfully!', 'success');
+                    isAdmin = true;
+                    currentRoom = res.roomName;
+                    currentUsername = 'Admin';
+                    
+                    // Show manage tab and switch to it
+                    document.getElementById('manageTabBtn').style.display = 'block';
+                    switchTab('manage');
+                    
+                    // Show chat section
+                    heroSection.style.display = 'none';
+                    chatSection.style.display = 'block';
+                    document.getElementById('roomTitle').innerText = roomName + ' (Admin)';
+                    chatInput.disabled = false;
+                    sendBtn.disabled = false;
+                } else {
+                    showNotification(res.message, 'error');
+                }
+            });
+        }
+
+        function approveUser(socketId) {
+            socket.emit('approveUser', { userSocketId: socketId, roomName: currentRoom }, (res) => {
+                if (res.success) {
+                    showNotification('User approved', 'success');
+                } else {
+                    showNotification(res.message, 'error');
+                }
+            });
+        }
+
+        function rejectUser(socketId) {
+            socket.emit('rejectUser', { userSocketId: socketId, roomName: currentRoom }, (res) => {
+                if (res.success) {
+                    showNotification('User rejected', 'success');
+                } else {
+                    showNotification(res.message, 'error');
+                }
+            });
+        }
+
+        function removeUser(socketId) {
+            socket.emit('removeUser', { userSocketId: socketId, roomName: currentRoom }, (res) => {
+                if (res.success) {
+                    showNotification('User removed', 'success');
+                } else {
+                    showNotification(res.message, 'error');
+                }
+            });
+        }
+
+        function updateUserList(containerId, users, isPending) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+
+            if (users.length === 0) {
+                container.innerHTML = `<div class="empty-state"><i class="fas fa-user${isPending ? '-clock' : 's'}"></i><p>No ${isPending ? 'pending requests' : 'active users'}</p></div>`;
+                return;
+            }
+
+            users.forEach(u => {
+                const card = document.createElement('div');
+                card.className = 'user-card';
+                card.innerHTML = `
+                    <div class="user-info">
+                        <div class="user-avatar">${u.username.charAt(0).toUpperCase()}</div>
+                        <div>${u.username}</div>
+                    </div>
+                    <div class="user-actions">
+                        ${isPending ? `<button class="accept-btn" onclick="approveUser('${u.socketId}')">Accept</button>
+                        <button class="reject-btn" onclick="rejectUser('${u.socketId}')">Reject</button>`
+                        : `<button class="remove-btn" onclick="removeUser('${u.socketId}')">Remove</button>`}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // ==========================================
+        // UI FUNCTIONS
+        // ==========================================
+
+        function addMessageToChat(author, text, type = 'other') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            if (type === 'system') {
+                messageDiv.innerHTML = `<div class="message-bubble">${text}</div>`;
+            } else {
+                const authorHtml = type === 'other' ? `<div class="message-author">${author}</div>` : '';
+                messageDiv.innerHTML = `${authorHtml}<div class="message-bubble">${text}</div>`;
+            }
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function showNotification(message, type = 'info') {
+            notification.innerText = message;
+            notification.className = 'notification show ' + type;
+            setTimeout(() => notification.classList.remove('show'), 4000);
+        }
+
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+            document.getElementById(tab + 'Tab').classList.add('active');
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target === modal) {
+                    modal.classList.remove('active');
+                }
+            });
+        }
+
+        // Initialize
+        window.onload = function() {
+            createParticles();
+        }
+    </script>
+</body>
+</html>
